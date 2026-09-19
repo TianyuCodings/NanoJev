@@ -206,7 +206,9 @@ python scripts/serve_decisions_mlx.py \
   --web-root web --port 8765
 ```
 
-The service exposes the same `GET /api/health` and `POST /api/evaluate` contract as the PyTorch service. It performs one non-autoregressive backbone pass, returns complete candidate distributions, and supports Boolean, Choice, and Score questions. The current Apple Silicon path stores the Qwen3 backbone in float16 and the small decision head in float32. It is compatible with an oMLX-served backbone, but the decision head must still be called by `scripts/serve_decisions_mlx.py`; ordinary oMLX `/v1/chat/completions` is not the NanoJev decision API.
+The service exposes the same `GET /api/health` and `POST /api/evaluate` contract as the PyTorch service. It performs one non-autoregressive backbone pass, returns complete candidate distributions, and supports Boolean, Choice, and Score questions. The current Apple Silicon path stores the Qwen3 backbone in float16 and the small decision head in float32.
+
+The converted `omlx-backbone-mlx` directory is also discoverable by oMLX as an ordinary Qwen3 model. Copy it below an oMLX model root as `nanojev-backbone` and verify it through oMLX's `/v1/models` or `/v1/chat/completions` endpoint. The NanoJev decision service currently loads the same MLX artifact directly; it does not ask oMLX's text-generation endpoint for hidden states, and ordinary oMLX `/v1/chat/completions` therefore remains a backbone smoke test rather than the NanoJev decision API. The structured decision endpoint is `scripts/serve_decisions_mlx.py` and `/api/evaluate`.
 
 A warm inference benchmark (excluding process startup and HTTP transport) is available:
 

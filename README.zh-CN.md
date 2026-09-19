@@ -205,7 +205,9 @@ python scripts/serve_decisions_mlx.py \
   --web-root web --port 8765
 ```
 
-服务提供与 PyTorch 服务相同的 `GET /api/health` 和 `POST /api/evaluate` 协议。一次请求执行一次非自回归 backbone forward，返回完整候选分布，并支持 Boolean、Choice、Score 三类问题。当前 Apple Silicon 路径将 Qwen3 backbone 存为 float16，将小型 decision head 保持为 float32。它可以复用由 oMLX 加载的 backbone，但 decision head 仍需由 `scripts/serve_decisions_mlx.py` 调用；普通 oMLX `/v1/chat/completions` 不是 NanoJev 的决策接口。
+服务提供与 PyTorch 服务相同的 `GET /api/health` 和 `POST /api/evaluate` 协议。一次请求执行一次非自回归 backbone forward，返回完整候选分布，并支持 Boolean、Choice、Score 三类问题。当前 Apple Silicon 路径将 Qwen3 backbone 存为 float16，将小型 decision head 保持为 float32。
+
+转换后的 `omlx-backbone-mlx` 目录也可以被 oMLX 作为普通 Qwen3 模型发现。将它复制到 oMLX 模型根目录下的 `nanojev-backbone`，再通过 oMLX 的 `/v1/models` 或 `/v1/chat/completions` 验证。当前 NanoJev 决策服务会直接加载同一个 MLX artifact；它不会从 oMLX 文本生成接口请求隐藏状态，因此普通 oMLX `/v1/chat/completions` 只是 backbone smoke test，不是 NanoJev 决策 API。结构化决策入口仍是 `scripts/serve_decisions_mlx.py` 和 `/api/evaluate`。
 
 可运行 warm inference 基准测试（不包含进程启动和 HTTP 传输）：
 
