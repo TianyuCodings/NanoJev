@@ -178,6 +178,68 @@ Open **http://127.0.0.1:8765**. The service loads the model once and accepts rep
 
 The [pipeline runbook](research/pipeline_runbook.md) covers data generation, training, evaluation, checkpoint creation, and continuing from the downloaded model and data.
 
+## Apple Silicon / MLX inference
+
+NanoJev is a non-generative decision model: the Qwen3 backbone produces candidate-path hidden states, then NanoJev's decision head emits the complete Boolean, Choice, or Score distribution. On Apple Silicon, the MLX backend keeps that decision head instead of routing the request through ordinary text generation.
+
+Install the optional MLX dependencies in an arm64 Python environment:
+
+```bash
+python -m pip install -r requirements-mlx.txt
+```
+
+Convert a downloaded NanoJev checkpoint. The converter extracts only `backbone.*`, preserves the original tokenizer (including Qwen3's `<|im_end|>` EOS), and leaves `best.safetensors` as the decision-head file:
+
+```bash
+python scripts/convert_mlx_checkpoint.py \
+  --checkpoint-dir checkpoints/local_atomic_seed17 \
+  --output-dir omlx-backbone-mlx \
+  --dtype float16
+```
+
+Run the MLX decision service:
+
+```bash
+python scripts/serve_decisions_mlx.py \
+  --model-dir omlx-backbone-mlx \
+  --decision-head checkpoints/local_atomic_seed17/best.safetensors \
+  --web-root web --port 8765
+```
+
+The service exposes the same `GET /api/health` and `POST /api/evaluate` contract as the PyTorch service. It performs one non-autoregressive backbone pass, returns complete candidate distributions, and supports Boolean, Choice, and Score questions. The current Apple Silicon path stores the Qwen3 backbone in float16 and the small decision head in float32.
+
+The converted `omlx-backbone-mlx` directory is also discoverable by oMLX as an ordinary Qwen3 model. Copy it below an oMLX model root as `nanojev-backbone` and verify it through oMLX's `/v1/models` or `/v1/chat/completions` endpoint. The NanoJev decision service currently loads the same MLX artifact directly; it does not ask oMLX's text-generation endpoint for hidden states, and ordinary oMLX `/v1/chat/completions` therefore remains a backbone smoke test rather than the NanoJev decision API. The structured decision endpoint is `scripts/serve_decisions_mlx.py` and `/api/evaluate`.
+
+To verify native oMLX discovery separately from NanoJev decision inference:
+
+```bash
+python scripts/test_omlx_compat.py \
+  --model-dir omlx-backbone-mlx \
+  --omlx-cli /path/to/omlx
+```
+
+This smoke test checks that oMLX discovers `nanojev-backbone` and serves ordinary `/v1/chat/completions`. The structured NanoJev path remains `/api/evaluate`, because the public oMLX text API does not expose backbone hidden states or a custom decision-head hook.
+
+A warm inference benchmark (excluding process startup and HTTP transport) is available:
+
+```bash
+python scripts/benchmark_mlx_decisions.py \
+  --model-dir omlx-backbone-mlx \
+  --decision-head checkpoints/local_atomic_seed17/best.safetensors \
+  --questions 1 4 8 --candidates 2 4 8
+```
+
+On the development M5 Max run, 8 questions × 8 candidates completed in a median **78.55 ms** (64 candidate paths); the exact numbers depend on the Apple Silicon model, MLX version, and thermal state.
+
+Run the local regression/contract test, optionally against a PyTorch/MPS reference result:
+
+```bash
+python scripts/test_mlx_decisions.py \
+  --model-dir omlx-backbone-mlx \
+  --decision-head checkpoints/local_atomic_seed17/best.safetensors
+```
+
+
 ## Roadmap
 
 - [x] **Scale up data** — Add larger mazes, Snake, atomic questions, and observed-event datasets.

@@ -177,6 +177,68 @@ python scripts/serve_decisions.py \
 
 [完整手册](research/pipeline_runbook.md)包含数据生成、训练、评测、checkpoint 创建，以及从下载模型和数据继续运行的命令。
 
+## Apple Silicon / MLX 推理
+
+NanoJev 不是普通文本生成模型：Qwen3 backbone 先为每条候选路径产生隐藏状态，再由 NanoJev decision head 直接输出 Boolean、Choice 或 Score 的完整分布。在 Apple Silicon 上，MLX backend 保留这条非自回归决策路径，不会把请求改写成普通文本生成。
+
+在 arm64 Python 环境安装可选的 MLX 依赖：
+
+```bash
+python -m pip install -r requirements-mlx.txt
+```
+
+转换下载的 NanoJev checkpoint。转换器只提取 `backbone.*`，保留原始 tokenizer（包括 Qwen3 的 `<|im_end|>` EOS），`best.safetensors` 继续作为 decision head 文件：
+
+```bash
+python scripts/convert_mlx_checkpoint.py \
+  --checkpoint-dir checkpoints/local_atomic_seed17 \
+  --output-dir omlx-backbone-mlx \
+  --dtype float16
+```
+
+启动 MLX 决策服务：
+
+```bash
+python scripts/serve_decisions_mlx.py \
+  --model-dir omlx-backbone-mlx \
+  --decision-head checkpoints/local_atomic_seed17/best.safetensors \
+  --web-root web --port 8765
+```
+
+服务提供与 PyTorch 服务相同的 `GET /api/health` 和 `POST /api/evaluate` 协议。一次请求执行一次非自回归 backbone forward，返回完整候选分布，并支持 Boolean、Choice、Score 三类问题。当前 Apple Silicon 路径将 Qwen3 backbone 存为 float16，将小型 decision head 保持为 float32。
+
+转换后的 `omlx-backbone-mlx` 目录也可以被 oMLX 作为普通 Qwen3 模型发现。将它复制到 oMLX 模型根目录下的 `nanojev-backbone`，再通过 oMLX 的 `/v1/models` 或 `/v1/chat/completions` 验证。当前 NanoJev 决策服务会直接加载同一个 MLX artifact；它不会从 oMLX 文本生成接口请求隐藏状态，因此普通 oMLX `/v1/chat/completions` 只是 backbone smoke test，不是 NanoJev 决策 API。结构化决策入口仍是 `scripts/serve_decisions_mlx.py` 和 `/api/evaluate`。
+
+如需单独验证原生 oMLX 是否能发现该 backbone：
+
+```bash
+python scripts/test_omlx_compat.py \
+  --model-dir omlx-backbone-mlx \
+  --omlx-cli /path/to/omlx
+```
+
+这个 smoke test 会检查 oMLX 是否发现 `nanojev-backbone` 并能提供普通 `/v1/chat/completions`。结构化 NanoJev 路径仍然是 `/api/evaluate`，因为 oMLX 的公开文本接口不会暴露 backbone hidden states，也没有自定义 decision-head hook。
+
+可运行 warm inference 基准测试（不包含进程启动和 HTTP 传输）：
+
+```bash
+python scripts/benchmark_mlx_decisions.py \
+  --model-dir omlx-backbone-mlx \
+  --decision-head checkpoints/local_atomic_seed17/best.safetensors \
+  --questions 1 4 8 --candidates 2 4 8
+```
+
+在本次开发机 M5 Max 测试中，8 个问题 × 每题 8 个候选（共 64 条候选路径）的中位耗时为 **78.55 ms**；实际数字会随 Apple Silicon 型号、MLX 版本和温度变化。
+
+运行本地回归/契约测试：
+
+```bash
+python scripts/test_mlx_decisions.py \
+  --model-dir omlx-backbone-mlx \
+  --decision-head checkpoints/local_atomic_seed17/best.safetensors
+```
+
+
 ## 路线图
 
 - [x] **扩展数据：** 大迷宫、贪吃蛇、原子问题与观测事件数据集。

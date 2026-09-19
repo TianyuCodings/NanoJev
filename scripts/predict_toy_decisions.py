@@ -193,16 +193,33 @@ class DecisionPredictor:
         from safetensors.torch import load_file
         from transformers import AutoConfig, AutoModel, AutoTokenizer
     
-        if disable_native_triton:
-            from torch._native import triton_utils
-            triton_utils.deregister_op_overrides()
+        if device_name == "auto":
+            if torch.backends.mps.is_available():
+                device_name = "mps"
+            elif torch.cuda.is_available():
+                device_name = "cuda:0"
+            else:
+                device_name = "cpu"
         device = torch.device(device_name)
-        if device.type != "cuda" or not torch.cuda.is_available():
-            raise ValueError("此原型推理入口需要可用CUDA设备；本命令未启用CPU或远程回退")
-        torch.cuda.set_device(device)
-        if precision == "bf16" and not torch.cuda.is_bf16_supported():
-            raise ValueError("当前CUDA设备不支持本checkpoint推理配置所需的BF16")
-        torch.backends.cuda.matmul.allow_tf32 = False
+        if device.type == "cuda":
+            if not torch.cuda.is_available():
+                raise ValueError("请求了CUDA，但当前机器没有可用CUDA设备")
+            if disable_native_triton:
+                from torch._native import triton_utils
+                triton_utils.deregister_op_overrides()
+            torch.cuda.set_device(device)
+            if precision == "bf16" and not torch.cuda.is_bf16_supported():
+                raise ValueError("当前CUDA设备不支持本checkpoint推理配置所需的BF16")
+            torch.backends.cuda.matmul.allow_tf32 = False
+        elif device.type == "mps":
+            if not torch.backends.mps.is_available():
+                raise ValueError("请求了MPS，但当前机器没有可用Apple Metal设备")
+        elif device.type != "cpu":
+            raise ValueError(f"不支持的设备类型：{device}")
+        # The recorded A100 path uses CUDA BF16.  On Apple Silicon, keep the
+        # first compatibility path in FP32; MPS BF16 coverage is backend/version
+        # dependent and can fail inside Qwen attention kernels.
+        self._autocast_enabled = precision == "bf16" and device.type == "cuda"
     
         tokenizer = AutoTokenizer.from_pretrained(str(paths["tokenizer"]), local_files_only=True,
                                                  trust_remote_code=False)
@@ -254,7 +271,7 @@ class DecisionPredictor:
         outputs = {state["id"]: {"id": state["id"], "answers": {}} for state in states}
         with torch.inference_mode():
             for batch in batches:
-                with torch.autocast("cuda", dtype=torch.bfloat16, enabled=precision == "bf16"):
+                with torch.autocast("cuda", dtype=torch.bfloat16, enabled=self._autocast_enabled):
                     logits, _ = model(batch, tokenizer.pad_token_id)
                 for example, values in zip(batch, logits):
                     k = len(example["candidate_ids"])
@@ -270,7 +287,7 @@ class DecisionPredictor:
             "temperature": {"value": float(temperature), "fitted_by_this_command": False,
                             "note": "显式应用给定标量；默认1不表示模型已校准。"},
             "execution": {"device": str(device), "parameter_storage": "float32", "precision": precision,
-                          "forward_autocast": "bfloat16" if precision == "bf16" else "disabled",
+                          "forward_autocast": "bfloat16" if self._autocast_enabled else "disabled",
                           "states": len(states), "questions": len(examples),
                           "candidate_paths": sum(len(ex["leaf_tokens"]) for ex in examples),
                           "forward_passes": len(batches), "batch_questions_limit": batch_questions or "all",
@@ -302,7 +319,7 @@ def main():
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--batch-questions", type=int, default=0, help="0=全部问题一次前向；其他值按完整问题分批")
     parser.add_argument("--max-length", type=int, help="默认使用checkpoint训练配置；超长输入报错，不截断")
-    parser.add_argument("--device", default="cuda:0")
+    parser.add_argument("--device", default="auto", help="auto/mps/cpu/cuda:0；Apple Silicon 推荐 auto 或 mps")
     parser.add_argument("--precision", choices=["fp32", "bf16"], default="bf16",
                         help="bf16沿用训练评估默认；fp32关闭autocast用于数值参照")
     parser.add_argument("--disable-native-triton", action="store_true", help="沿用trainer的进程内ATen回退开关")
