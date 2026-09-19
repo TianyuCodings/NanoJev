@@ -122,9 +122,13 @@ class DecisionModel(nn.Module):
             h[i, :n] = leaves[offset:offset+n]
             valid[i, :len(ex['candidate_ids'])] = True
             offset += n
+        return self._score_leaves(h, valid, examples)
+
+    def _score_leaves(self, h, valid, examples):
+        kmax = h.shape[1]
         h = self.norm(h)
         z = self.scalar(h).squeeze(-1).float()
-        choice = torch.tensor([i for i, ex in enumerate(examples) if ex['type'] == 'choice'], device=device)
+        choice = torch.tensor([i for i, ex in enumerate(examples) if ex['type'] == 'choice'], device=h.device)
         if self.set_head == 'attention' and len(choice):
             log_k = valid[choice].sum(-1).float().log()[:, None, None].expand(-1, kmax, 1)
             u = self.set_project(torch.cat([h[choice], log_k.to(h.dtype)], dim=-1))
@@ -139,6 +143,35 @@ class DecisionModel(nn.Module):
             else:
                 out.append(z[i])
         return torch.stack(out).masked_fill(~valid, -1e9), valid
+
+    def forward_shared(self, example, pad_token):
+        """Single-question prefix sharing: encode the shared state+question once, then batch candidate suffixes."""
+        device = self.scalar.weight.device
+        prefix = example['prefix_tokens']
+        suffixes = [leaf[len(prefix):] for leaf in example['leaf_tokens']]
+        p_ids = torch.tensor([prefix], dtype=torch.long, device=device)
+        out = self.backbone(input_ids=p_ids, attention_mask=torch.ones_like(p_ids), use_cache=True)
+        past = out.past_key_values
+        n = len(suffixes)
+        past.batch_repeat_interleave(n)
+        S = max(len(s) for s in suffixes)
+        s_ids = torch.full((n, S), pad_token, dtype=torch.long, device=device)
+        for i, s in enumerate(suffixes):
+            s_ids[i, :len(s)] = torch.tensor(s, device=device)
+        mask = torch.zeros(n, len(prefix) + S, dtype=torch.long, device=device)
+        mask[:, :len(prefix)] = 1
+        for i, s in enumerate(suffixes):
+            mask[i, len(prefix):len(prefix) + len(s)] = 1
+        hidden = self.backbone(input_ids=s_ids, attention_mask=mask,
+                               past_key_values=past, use_cache=False).last_hidden_state
+        lengths = torch.tensor([len(s) for s in suffixes], device=device)
+        leaves = hidden[torch.arange(n, device=device), lengths - 1]
+        kmax = len(example['candidate_ids'])
+        h = leaves.new_zeros((1, kmax, leaves.shape[-1]))
+        valid = torch.zeros((1, kmax), dtype=torch.bool, device=device)
+        h[0, :n] = leaves
+        valid[0, :kmax] = True
+        return self._score_leaves(h, valid, [example])
 
 
 def loss_for(logits, examples, objective):

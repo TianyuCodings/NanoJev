@@ -115,7 +115,7 @@ def prepare_examples(payload, tokenizer, max_length):
                 raise ValueError(f"{row['id']}:{qid} 候选路径为 {largest} token，超过 max_length={max_length}；未截断输入")
             examples.append({"id": f"{row['id']}:{qid}", "state_id": row["id"], "qid": qid,
                              "type": typ, "candidate_ids": ids, "candidate_texts": texts,
-                             "leaf_tokens": leaves})
+                             "prefix_tokens": prefix, "leaf_tokens": leaves})
     return examples
 
 
