@@ -178,6 +178,45 @@ Open **http://127.0.0.1:8765**. The service loads the model once and accepts rep
 
 The [pipeline runbook](research/pipeline_runbook.md) covers data generation, training, evaluation, checkpoint creation, and continuing from the downloaded model and data.
 
+## Apple Silicon / MLX inference
+
+NanoJev is a non-generative decision model: the Qwen3 backbone produces candidate-path hidden states, then NanoJev's decision head emits the complete Boolean, Choice, or Score distribution. On Apple Silicon, the MLX backend keeps that decision head instead of routing the request through ordinary text generation.
+
+Install the optional MLX dependencies in an arm64 Python environment:
+
+```bash
+python -m pip install -r requirements-mlx.txt
+```
+
+Convert a downloaded NanoJev checkpoint. The converter extracts only `backbone.*`, preserves the original tokenizer (including Qwen3's `<|im_end|>` EOS), and leaves `best.safetensors` as the decision-head file:
+
+```bash
+python scripts/convert_mlx_checkpoint.py \
+  --checkpoint-dir checkpoints/local_atomic_seed17 \
+  --output-dir omlx-backbone-mlx \
+  --dtype float16
+```
+
+Run the MLX decision service:
+
+```bash
+python scripts/serve_decisions_mlx.py \
+  --model-dir omlx-backbone-mlx \
+  --decision-head checkpoints/local_atomic_seed17/best.safetensors \
+  --web-root web --port 8765
+```
+
+The service exposes the same `GET /api/health` and `POST /api/evaluate` contract as the PyTorch service. It performs one non-autoregressive backbone pass, returns complete candidate distributions, and supports Boolean, Choice, and Score questions. The current Apple Silicon path stores the Qwen3 backbone in float16 and the small decision head in float32. It is compatible with an oMLX-served backbone, but the decision head must still be called by `scripts/serve_decisions_mlx.py`; ordinary oMLX `/v1/chat/completions` is not the NanoJev decision API.
+
+Run the local regression/contract test, optionally against a PyTorch/MPS reference result:
+
+```bash
+python scripts/test_mlx_decisions.py \
+  --model-dir omlx-backbone-mlx \
+  --decision-head checkpoints/local_atomic_seed17/best.safetensors
+```
+
+
 ## Roadmap
 
 - [x] **Scale up data** — Add larger mazes, Snake, atomic questions, and observed-event datasets.

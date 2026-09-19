@@ -22,3 +22,6 @@ publish/
 *.pt
 *.pth
 .DS_Store
+# Local MLX conversion products (large generated backbone files)
+omlx-backbone-hf/
+omlx-backbone-mlx/

@@ -177,6 +177,45 @@ python scripts/serve_decisions.py \
 
 [完整手册](research/pipeline_runbook.md)包含数据生成、训练、评测、checkpoint 创建，以及从下载模型和数据继续运行的命令。
 
+## Apple Silicon / MLX 推理
+
+NanoJev 不是普通文本生成模型：Qwen3 backbone 先为每条候选路径产生隐藏状态，再由 NanoJev decision head 直接输出 Boolean、Choice 或 Score 的完整分布。在 Apple Silicon 上，MLX backend 保留这条非自回归决策路径，不会把请求改写成普通文本生成。
+
+在 arm64 Python 环境安装可选的 MLX 依赖：
+
+```bash
+python -m pip install -r requirements-mlx.txt
+```
+
+转换下载的 NanoJev checkpoint。转换器只提取 `backbone.*`，保留原始 tokenizer（包括 Qwen3 的 `<|im_end|>` EOS），`best.safetensors` 继续作为 decision head 文件：
+
+```bash
+python scripts/convert_mlx_checkpoint.py \
+  --checkpoint-dir checkpoints/local_atomic_seed17 \
+  --output-dir omlx-backbone-mlx \
+  --dtype float16
+```
+
+启动 MLX 决策服务：
+
+```bash
+python scripts/serve_decisions_mlx.py \
+  --model-dir omlx-backbone-mlx \
+  --decision-head checkpoints/local_atomic_seed17/best.safetensors \
+  --web-root web --port 8765
+```
+
+服务提供与 PyTorch 服务相同的 `GET /api/health` 和 `POST /api/evaluate` 协议。一次请求执行一次非自回归 backbone forward，返回完整候选分布，并支持 Boolean、Choice、Score 三类问题。当前 Apple Silicon 路径将 Qwen3 backbone 存为 float16，将小型 decision head 保持为 float32。它可以复用由 oMLX 加载的 backbone，但 decision head 仍需由 `scripts/serve_decisions_mlx.py` 调用；普通 oMLX `/v1/chat/completions` 不是 NanoJev 的决策接口。
+
+运行本地回归/契约测试：
+
+```bash
+python scripts/test_mlx_decisions.py \
+  --model-dir omlx-backbone-mlx \
+  --decision-head checkpoints/local_atomic_seed17/best.safetensors
+```
+
+
 ## 路线图
 
 - [x] **扩展数据：** 大迷宫、贪吃蛇、原子问题与观测事件数据集。
