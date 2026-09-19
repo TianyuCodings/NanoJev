@@ -209,6 +209,16 @@ python scripts/serve_decisions_mlx.py \
 
 转换后的 `omlx-backbone-mlx` 目录也可以被 oMLX 作为普通 Qwen3 模型发现。将它复制到 oMLX 模型根目录下的 `nanojev-backbone`，再通过 oMLX 的 `/v1/models` 或 `/v1/chat/completions` 验证。当前 NanoJev 决策服务会直接加载同一个 MLX artifact；它不会从 oMLX 文本生成接口请求隐藏状态，因此普通 oMLX `/v1/chat/completions` 只是 backbone smoke test，不是 NanoJev 决策 API。结构化决策入口仍是 `scripts/serve_decisions_mlx.py` 和 `/api/evaluate`。
 
+如需单独验证原生 oMLX 是否能发现该 backbone：
+
+```bash
+python scripts/test_omlx_compat.py \
+  --model-dir omlx-backbone-mlx \
+  --omlx-cli /path/to/omlx
+```
+
+这个 smoke test 会检查 oMLX 是否发现 `nanojev-backbone` 并能提供普通 `/v1/chat/completions`。结构化 NanoJev 路径仍然是 `/api/evaluate`，因为 oMLX 的公开文本接口不会暴露 backbone hidden states，也没有自定义 decision-head hook。
+
 可运行 warm inference 基准测试（不包含进程启动和 HTTP 传输）：
 
 ```bash

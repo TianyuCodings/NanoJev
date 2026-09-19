@@ -210,6 +210,16 @@ The service exposes the same `GET /api/health` and `POST /api/evaluate` contract
 
 The converted `omlx-backbone-mlx` directory is also discoverable by oMLX as an ordinary Qwen3 model. Copy it below an oMLX model root as `nanojev-backbone` and verify it through oMLX's `/v1/models` or `/v1/chat/completions` endpoint. The NanoJev decision service currently loads the same MLX artifact directly; it does not ask oMLX's text-generation endpoint for hidden states, and ordinary oMLX `/v1/chat/completions` therefore remains a backbone smoke test rather than the NanoJev decision API. The structured decision endpoint is `scripts/serve_decisions_mlx.py` and `/api/evaluate`.
 
+To verify native oMLX discovery separately from NanoJev decision inference:
+
+```bash
+python scripts/test_omlx_compat.py \
+  --model-dir omlx-backbone-mlx \
+  --omlx-cli /path/to/omlx
+```
+
+This smoke test checks that oMLX discovers `nanojev-backbone` and serves ordinary `/v1/chat/completions`. The structured NanoJev path remains `/api/evaluate`, because the public oMLX text API does not expose backbone hidden states or a custom decision-head hook.
+
 A warm inference benchmark (excluding process startup and HTTP transport) is available:
 
 ```bash
