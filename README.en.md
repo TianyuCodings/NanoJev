@@ -194,6 +194,17 @@ python scripts/serve_decisions_mlx.py \
 
 The service exposes the same `GET /api/health` and `POST /api/evaluate` contract as the PyTorch service. It performs one non-autoregressive backbone pass, returns complete candidate distributions, and supports Boolean, Choice, and Score questions. The current Apple Silicon path stores the Qwen3 backbone in float16 and the small decision head in float32. It is compatible with an oMLX-served backbone, but the decision head must still be called by `scripts/serve_decisions_mlx.py`; ordinary oMLX `/v1/chat/completions` is not the NanoJev decision API.
 
+A warm inference benchmark (excluding process startup and HTTP transport) is available:
+
+```bash
+python scripts/benchmark_mlx_decisions.py \
+  --model-dir omlx-backbone-mlx \
+  --decision-head checkpoints/local_atomic_seed17/best.safetensors \
+  --questions 1 4 8 --candidates 2 4 8
+```
+
+On the development M5 Max run, 8 questions × 8 candidates completed in a median **78.55 ms** (64 candidate paths); the exact numbers depend on the Apple Silicon model, MLX version, and thermal state.
+
 Run the local regression/contract test, optionally against a PyTorch/MPS reference result:
 
 ```bash

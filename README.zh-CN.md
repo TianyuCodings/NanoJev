@@ -207,6 +207,17 @@ python scripts/serve_decisions_mlx.py \
 
 服务提供与 PyTorch 服务相同的 `GET /api/health` 和 `POST /api/evaluate` 协议。一次请求执行一次非自回归 backbone forward，返回完整候选分布，并支持 Boolean、Choice、Score 三类问题。当前 Apple Silicon 路径将 Qwen3 backbone 存为 float16，将小型 decision head 保持为 float32。它可以复用由 oMLX 加载的 backbone，但 decision head 仍需由 `scripts/serve_decisions_mlx.py` 调用；普通 oMLX `/v1/chat/completions` 不是 NanoJev 的决策接口。
 
+可运行 warm inference 基准测试（不包含进程启动和 HTTP 传输）：
+
+```bash
+python scripts/benchmark_mlx_decisions.py \
+  --model-dir omlx-backbone-mlx \
+  --decision-head checkpoints/local_atomic_seed17/best.safetensors \
+  --questions 1 4 8 --candidates 2 4 8
+```
+
+在本次开发机 M5 Max 测试中，8 个问题 × 每题 8 个候选（共 64 条候选路径）的中位耗时为 **78.55 ms**；实际数字会随 Apple Silicon 型号、MLX 版本和温度变化。
+
 运行本地回归/契约测试：
 
 ```bash
