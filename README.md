@@ -146,7 +146,9 @@ The [game data package](https://huggingface.co/datasets/C-Tianyu/NanoJev-Data/tr
 
 ## Download and run the model
 
-The [model](https://huggingface.co/C-Tianyu/NanoJev) and [dataset](https://huggingface.co/datasets/C-Tianyu/NanoJev-Data) are public. Prepare a CUDA environment with the recorded [Python dependencies](requirements-toy.txt):
+The [model](https://huggingface.co/C-Tianyu/NanoJev) and [dataset](https://huggingface.co/datasets/C-Tianyu/NanoJev-Data) are public. `best.safetensors` already contains the Qwen3-0.6B backbone **and** the decision heads, so inference does **not** download `Qwen/Qwen3-0.6B` again. Hugging Face Hub is only used to fetch that checkpoint; running it still needs **PyTorch**, **transformers**, and **safetensors**.
+
+Prepare a CUDA environment with the recorded [Python dependencies](requirements-toy.txt):
 
 ```bash
 python -m pip install -r requirements-toy.txt
@@ -175,6 +177,16 @@ python scripts/serve_decisions.py \
 ```
 
 Open **http://127.0.0.1:8765**. The service loads the model once and accepts repeated batches through **`POST /api/evaluate`**.
+
+### Apple Silicon (Mac)
+
+`serve_decisions.py` and `predict_toy_decisions.py` default to `--device auto`: CUDA if present, otherwise MPS, otherwise CPU. NVIDIA CUDA is not required for inference. On macOS install the Mac PyTorch wheel (do not use the CUDA pins in `requirements-toy.txt`):
+
+```bash
+python -m pip install torch transformers safetensors huggingface_hub
+```
+
+Then the same `snapshot_download` + `serve_decisions.py` commands as above. MPS inference uses fp32 by default; on an M3 Max this matched the published maze local-safety test accuracy of **77.84%** (176 questions). Training scripts remain CUDA-oriented.
 
 The [pipeline runbook](research/pipeline_runbook.md) covers data generation, training, evaluation, checkpoint creation, and continuing from the downloaded model and data.
 

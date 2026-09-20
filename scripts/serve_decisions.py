@@ -60,14 +60,18 @@ def server_class(engine, web_root):
 if __name__=='__main__':
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--checkpoint-dir',required=True)
     p.add_argument('--web-root',default='web');p.add_argument('--host',default='127.0.0.1');p.add_argument('--port',type=int,default=8765)
-    p.add_argument('--precision',choices=['fp32','bf16'],default='bf16');p.add_argument('--disable-native-triton',action='store_true')
+    p.add_argument('--device',default='auto',help='auto=cuda if present else Apple MPS else CPU')
+    p.add_argument('--precision',choices=['auto','fp32','bf16'],default='auto')
+    p.add_argument('--disable-native-triton',action='store_true')
     a=p.parse_args()
     from predict_toy_decisions import DecisionPredictor
-    engine=DecisionPredictor(a.checkpoint_dir,precision=a.precision,disable_native_triton=a.disable_native_triton)
+    engine=DecisionPredictor(a.checkpoint_dir,device_name=a.device,precision=a.precision,
+                             disable_native_triton=a.disable_native_triton)
     root=Path(a.web_root).resolve()
     if not (root/'index.html').is_file():raise ValueError('web-root must contain index.html')
     server=HTTPServer((a.host,a.port),server_class(engine,root))
-    print(json.dumps({'url':f'http://{a.host}:{a.port}','ready':True,'provider_calls':0}),flush=True)
+    print(json.dumps({'url':f'http://{a.host}:{a.port}','ready':True,'provider_calls':0,
+                      'device':str(engine.device),'precision':engine.precision}),flush=True)
     try:server.serve_forever()
     except KeyboardInterrupt:pass
     finally:server.server_close()

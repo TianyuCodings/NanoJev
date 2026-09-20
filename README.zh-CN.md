@@ -145,7 +145,9 @@ checkpoint_dir = Path(snapshot) / "variants" / variant
 
 ## 下载并运行模型
 
-模型和数据集均可公开下载。在兼容 CUDA 的环境中安装 [Python 依赖](requirements-toy.txt)：
+模型和数据集均可公开下载。`best.safetensors` 已包含 Qwen3-0.6B 底座**和**决策头，推理时**不会**再下载 `Qwen/Qwen3-0.6B`。Hugging Face Hub 只负责把这份 checkpoint 拉下来；运行还需要 **PyTorch**、**transformers** 和 **safetensors**。
+
+在兼容 CUDA 的环境中安装 [Python 依赖](requirements-toy.txt)：
 
 ```bash
 python -m pip install -r requirements-toy.txt
@@ -174,6 +176,16 @@ python scripts/serve_decisions.py \
 ```
 
 打开 **http://127.0.0.1:8765**，或向 **`POST /api/evaluate`** 发送批量请求。模型只加载一次，后续请求复用权重。
+
+### Apple Silicon（Mac）
+
+`serve_decisions.py` 与 `predict_toy_decisions.py` 默认 `--device auto`：有 CUDA 用 CUDA，否则用 MPS，再否则 CPU。推理不需要 NVIDIA。macOS 请安装官方 Mac 版 PyTorch（不要直接套 `requirements-toy.txt` 里的 CUDA 钉死版本）：
+
+```bash
+python -m pip install torch transformers safetensors huggingface_hub
+```
+
+随后使用与上面相同的 `snapshot_download` 和 `serve_decisions.py`。MPS 默认 fp32；在 M3 Max 上复现迷宫局部安全测试准确率为 **77.84%**（176 题）。训练脚本仍按 CUDA 编写。
 
 [完整手册](research/pipeline_runbook.md)包含数据生成、训练、评测、checkpoint 创建，以及从下载模型和数据继续运行的命令。
 
