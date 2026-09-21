@@ -149,5 +149,5 @@ Open **http://127.0.0.1:8080/dev/?autoplay=1** for ViZDoom Basic or **http://127
 - [x] 50×50 Maze, long Snake games and synchronized three-model browser replays.
 - [x] Mixed-task SFT, reproducible data splits and independently replayed evaluation.
 - [ ] RLCD post-training for broader long-horizon tasks.
-- [ ] Shared-prefix inference and larger candidate batches.
+- [x] Shared-prefix inference: each state/question prefix is evaluated once and candidate suffixes read it from cache. Larger candidate batches remain open.
 - [ ] Broader shooting scenarios and structured input support.

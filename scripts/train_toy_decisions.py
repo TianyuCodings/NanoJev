@@ -1,16 +1,23 @@
 #!/usr/bin/env python3
 """Small, auditable non-generative decision learning experiment.
 
-One backbone forward scores all candidate paths in a batch. This reference
-implementation repeats prefixes; tree sharing is a separately verified optimization.
-No chain of thought, vocabulary decoding loop, or candidate-wise generation.
+One backbone forward scores all candidate paths in a batch. `encode_leaves` is the
+reference encoder: it writes the shared state/question prefix into every candidate
+path, so a question with K candidates evaluates its prefix K times. Passing a
+`shared_prefix.SharedPrefixEncoder` as `forward(..., prefix_sharing=encoder)`
+computes each prefix once and reads only candidate suffixes against it; see
+`scripts/shared_prefix.py` for the equivalence argument and `docs/SHARED_PREFIX.md`
+for measured token counts. No chain of thought, vocabulary decoding loop, or
+candidate-wise generation.
 """
 import argparse
 import hashlib
 import importlib.metadata
+import importlib.util
 import json
 import math
 import random
+import sys
 import time
 from pathlib import Path
 
@@ -19,6 +26,31 @@ from torch import nn
 import torch.nn.functional as F
 from safetensors.torch import load_file, save_file
 from transformers import AutoModelForCausalLM, AutoTokenizer
+
+
+def _load_decision_encoding():
+    """Import the canonical encoder as a top-level module.
+
+    `scripts/` is on `sys.path` when these files run as scripts, but not when the
+    directory is imported as a package. The repository already relies on top-level names
+    (`calibrated_objectives`, `predict_toy_decisions`), so load the same way and register
+    under the real name, which keeps one implementation shared by both import styles.
+    """
+    name = "decision_encoding"
+    if name in sys.modules:
+        return sys.modules[name]
+    path = Path(__file__).with_name(name + ".py")
+    spec = importlib.util.spec_from_file_location(name, path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load {path}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+decision_encoding = _load_decision_encoding()
+build_candidate_paths = decision_encoding.build_candidate_paths
 
 
 def dump(path, obj):
@@ -31,30 +63,13 @@ def load_examples(path, tokenizer, max_length):
         row = json.loads(line)
         for qid, q in row['questions'].items():
             typ = q['type']
-            if typ == 'boolean':
-                ids, texts = ['false', 'true'], ['The proposition is true.']
-                gold = int(row['gold'][qid])
-            elif typ == 'choice':
-                ids = list(q['criteria'])
-                texts = [f"{key}: {q['criteria'][key]}" for key in ids]
+            # One canonical encoder for training and serving; see decision_encoding.py.
+            ids, texts, prefix, leaves = build_candidate_paths(
+                tokenizer.encode, row['state'], q, tokenizer.eos_token_id)
+            if typ == 'choice':
                 gold = ids.index(row['gold'][qid])
             else:
-                ids = [str(i) for i in range(len(q['criteria']))]
-                texts = q['criteria']  # Never inject ordinal index or adjacent levels.
                 gold = int(row['gold'][qid])
-            segments = [f"State:\n{row['state']}\n", f"Question type: {typ}\nQuestion:\n{q['instructions']}\n"]
-            if typ == 'boolean' and 'criteria' in q:
-                criteria = q['criteria']
-                if not isinstance(criteria, dict) or set(criteria) - {'false', 'true'}:
-                    raise ValueError('Boolean criteria may only contain false/true keys')
-                for key, label in [('false', 'False'), ('true', 'True')]:
-                    if key in criteria:
-                        if not isinstance(criteria[key], str) or not criteria[key].strip():
-                            raise ValueError('This prototype requires textual Boolean criteria')
-                        segments[1] += f"{label} criterion: {criteria[key]}\n"
-            prefix = sum([tokenizer.encode(t, add_special_tokens=False) for t in segments], [])
-            leaves = [prefix + tokenizer.encode(f"Candidate:\n{t}\nDecision:", add_special_tokens=False)
-                      + [tokenizer.eos_token_id] for t in texts]
             if max(map(len, leaves)) > max_length:
                 raise ValueError(f"No silent truncation: {row['id']}:{qid}")
             observed = row['teacher']['native_probs'][qid]
@@ -73,7 +88,8 @@ def load_examples(path, tokenizer, max_length):
             target = raw if teacher_ok else None
             ex = dict(id=f"{row['id']}:{qid}", state_id=row['state_id'], family_id=row['family_id'],
                       split=row['split'], qid=qid, type=typ, candidate_ids=ids, gold_index=gold,
-                      leaf_tokens=leaves, teacher_raw_probs=raw, teacher_probs=target,
+                      leaf_tokens=leaves, prefix_length=len(prefix),
+                      teacher_raw_probs=raw, teacher_probs=target,
                       teacher_rounding=row['teacher'].get('rounding'), source=row, candidate_texts=texts)
             examples.append(ex)
             audit.append(dict(id=ex['id'], split=ex['split'], type=typ, k=len(ids),
@@ -101,7 +117,14 @@ class DecisionModel(nn.Module):
             nn.init.zeros_(self.set_output.weight)
             nn.init.zeros_(self.set_output.bias)
 
-    def forward(self, examples, pad_token):
+    def encode_leaves(self, examples, pad_token):
+        """Reference candidate encoding: every path carries its own copy of the prefix.
+
+        Returns `(leaves, valid)` with `leaves` of shape `(questions, kmax, hidden)`
+        and `valid` a boolean mask over real candidate slots. Positions beyond a
+        question's candidate count are left at zero and marked invalid, which is
+        exactly what the scalar head and the set head ignore downstream.
+        """
         paths = [ids for ex in examples for ids in ex['leaf_tokens']]
         device = self.scalar.weight.device
         lengths = torch.tensor([len(ids) for ids in paths], device=device)
@@ -113,15 +136,40 @@ class DecisionModel(nn.Module):
         hidden = self.backbone(input_ids=tokens, attention_mask=attention,
                                use_cache=False).last_hidden_state
         leaves = hidden[torch.arange(len(paths), device=device), lengths-1]
+        return self.pack_leaves(examples, leaves)
+
+    def pack_leaves(self, examples, leaves):
+        """Reshape flat per-candidate leaf states into `(questions, kmax, hidden)`.
+
+        A Boolean question has one semantic path but reports two candidate slots, so its
+        single leaf is copied into both slots; `decision_head` maps a Boolean question to
+        `[0, z]` regardless, so the copied value is never read. Every other question needs
+        exactly one leaf per candidate. The remaining padding slots keep the zero fill the
+        reference encoder always produced.
+        """
+        device = leaves.device
+        expected = [len(ex['leaf_tokens']) for ex in examples]
+        if leaves.shape[0] != sum(expected):
+            raise ValueError('Leaf states must cover every question path exactly once')
         kmax = max(len(ex['candidate_ids']) for ex in examples)
         h = leaves.new_zeros((len(examples), kmax, leaves.shape[-1]))
         valid = torch.zeros((len(examples), kmax), dtype=torch.bool, device=device)
         offset = 0
         for i, ex in enumerate(examples):
-            n = len(ex['leaf_tokens'])
-            h[i, :n] = leaves[offset:offset+n]
-            valid[i, :len(ex['candidate_ids'])] = True
-            offset += n
+            paths, slots = expected[i], len(ex['candidate_ids'])
+            if paths != slots and not (ex['type'] == 'boolean' and paths == 1):
+                raise ValueError(f"{ex['id']}: {paths} leaf paths cannot fill {slots} candidate slots")
+            h[i, :paths] = leaves[offset:offset+paths]
+            if paths == 1 and slots > 1:
+                h[i, 1:slots] = leaves[offset]
+            valid[i, :slots] = True
+            offset += paths
+        return h, valid
+
+    def decision_head(self, examples, h, valid, return_logits=False):
+        """Score packed leaf states: shared scalar head plus the optional set head."""
+        device = h.device
+        kmax = valid.shape[1]
         h = self.norm(h)
         z = self.scalar(h).squeeze(-1).float()
         choice = torch.tensor([i for i, ex in enumerate(examples) if ex['type'] == 'choice'], device=device)
@@ -138,7 +186,31 @@ class DecisionModel(nn.Module):
                 out.append(F.pad(torch.stack([z[i, 0] * 0, z[i, 0]]), (0, kmax-2)))
             else:
                 out.append(z[i])
-        return torch.stack(out).masked_fill(~valid, -1e9), valid
+        logits = torch.stack(out).masked_fill(~valid, -1e9)
+        return (logits, valid) if return_logits else logits
+
+    def forward(self, examples, pad_token, prefix_sharing=None):
+        """Reference forward. `prefix_sharing` selects the shared-prefix encoder.
+
+        `None` and `False` keep the historical path, which repeats the prefix in
+        every candidate path. A `SharedPrefixEncoder` (or any callable with the
+        same `encode` signature) computes each question's prefix once and
+        evaluates only candidate suffixes against its cached keys and values.
+        """
+        if prefix_sharing:
+            rows = prefix_sharing.encode_examples(self.backbone, examples, pad_token)
+            if rows is None:
+                # No question in this batch has a shareable prefix; the reference
+                # encoding stays authoritative for the whole batch.
+                h, valid = self.encode_leaves(examples, pad_token)
+                return self.decision_head(examples, h, valid, return_logits=True)
+            if any(not isinstance(row, torch.Tensor) or row.dim() != 1 for row in rows):
+                raise ValueError('Shared-prefix encoder must return one rank-1 state per candidate')
+            leaves = torch.stack(rows) if len(rows) > 1 else rows[0].unsqueeze(0)
+            h, valid = self.pack_leaves(examples, leaves)
+            return self.decision_head(examples, h, valid, return_logits=True)
+        h, valid = self.encode_leaves(examples, pad_token)
+        return self.decision_head(examples, h, valid, return_logits=True)
 
 
 def loss_for(logits, examples, objective):
