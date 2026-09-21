@@ -1,0 +1,23 @@
+{
+  "dataset": "martinsn/high-frequency-crypto-limit-order-book-data",
+  "dataset_version": 1,
+  "publisher": "Martin Søgaard Nielsen",
+  "upstream_exchange": "Coinbase (publisher-reported websocket collection)",
+  "license": "CC0: Public Domain (publisher declaration)",
+  "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+  "landing_url": "https://www.kaggle.com/datasets/martinsn/high-frequency-crypto-limit-order-book-data",
+  "download_url": "https://www.kaggle.com/api/v1/datasets/download/martinsn/high-frequency-crypto-limit-order-book-data/BTC_1min.csv",
+  "retrieved_date": "2026-09-18",
+  "filename": "BTC_1min.csv",
+  "download_sha256": "8a6035dcdd26b4bdf3e861bfbf430a0a37f8939cc3914b8e1e27d0b40599e5b8",
+  "csv_sha256": "1a4bf5d19f0f9b41f93a7fadacb44f015f8f7eb3212995b77bd70182d99afa93",
+  "csv_bytes": 33161767,
+  "raw_rows": 17113,
+  "redistributed_raw_archive": true,
+  "transformation": "No synthetic rows; select historical features and realized future labels; purge and time-split. Original ZIP unchanged.",
+  "limitations": [
+    "Publisher data, not exchange-certified reconstruction.",
+    "Minute aggregation timestamp semantics not fully specified; apply conservative 60s availability delay, exclude flow columns.",
+    "Limited April 2021 coverage; final chronological holdout is not proof of a distribution shift."
+  ]
+}

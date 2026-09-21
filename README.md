@@ -137,6 +137,10 @@ python3 -m http.server 8080 --bind 127.0.0.1 --directory web
 
 Open **http://127.0.0.1:8080/dev/?autoplay=1** for ViZDoom Basic or **http://127.0.0.1:8080/dev/side-by-side.html?autoplay=1#maze** for Maze.
 
+## Optional research datasets
+
+[Finite-deck Blackjack and real Coinbase BTC direction](data_modules/README.md) provide standalone dataset generators, adapters and public Hugging Face downloads. They are optional experiments and are not included in the unified gaming mixture or the results above.
+
 ## Development notes
 
 [Release contents and reproduction](docs/UNIFIED_DEVELOPMENT_RELEASE.md) · [Input contract](docs/TYPESAFE_CONTRACT.md) · [Unified environments](docs/UNIFIED_GAMES.md) · [Atomic planning](docs/ATOMIC_PLANNING.md) · [Predict Position replay](docs/PREDICT_POSITION_DEMO.md) · [Shooting replay](docs/SHOOTING_DEMO.md)

@@ -1,0 +1,16 @@
+{
+  "availability_lag_seconds": 60,
+  "horizons_seconds": [60, 300, 900],
+  "target_tolerance_seconds": 15,
+  "lookback_rows": 15,
+  "max_gap_seconds": 90,
+  "embargo_seconds": 60,
+  "flat_threshold_bps": 2,
+  "splits": [
+    {"name": "train", "start": "2021-04-07T00:00:00Z", "end": "2021-04-14T00:00:00Z"},
+    {"name": "dev", "start": "2021-04-14T00:00:00Z", "end": "2021-04-15T00:00:00Z"},
+    {"name": "calibration", "start": "2021-04-15T00:00:00Z", "end": "2021-04-16T00:00:00Z"},
+    {"name": "test", "start": "2021-04-16T00:00:00Z", "end": "2021-04-18T00:00:00Z"},
+    {"name": "ood", "start": "2021-04-18T00:00:00Z", "end": "2021-04-20T00:00:00Z"}
+  ]
+}

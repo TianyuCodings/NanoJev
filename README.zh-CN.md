@@ -149,3 +149,7 @@ python3 -m http.server 8080 --bind 127.0.0.1 --directory web
 - [ ] 面向更多长程任务的 RLCD 后训练。
 - [ ] 共享前缀推理与更大的候选批次。
 - [ ] 更多射击场景与结构化输入支持。
+
+## 可选研究数据集
+
+[有限牌堆 Blackjack 与真实 Coinbase BTC 方向预测](data_modules/README.md) 提供独立的生成代码、adapter 和公开 Hugging Face 下载链接。这两个模块作为可选实验，不加入现有游戏混合训练，也不计入上面的模型结果。
