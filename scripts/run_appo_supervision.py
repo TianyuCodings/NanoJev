@@ -42,7 +42,8 @@ def completion_status(expected, records, errors, aborted=False):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--protocol', type=Path, default=Path('configs/appo_basic_supervision_v1.json'))
+    parser.add_argument('--protocol', type=Path,
+                    default=Path(__file__).resolve().parent.parent / 'configs/appo_basic_supervision_v1.json')
     parser.add_argument('--datasets', type=Path, required=True)
     parser.add_argument('--init-checkpoint', type=Path, required=True)
     parser.add_argument('--output', type=Path, required=True)
@@ -115,7 +116,7 @@ def main():
                     '--output', str(args.output / (name + '_regression_replay.json'))])
 
     # Retain the exact original regression cases; only Basic has a new cohort.
-    old_cases = [json.loads(line) for line in Path('configs/unified_games_v1_cases.jsonl').read_text().splitlines() if line.strip()]
+    old_cases = [json.loads(line) for line in (script_dir.parent / 'configs/unified_games_v1_cases.jsonl').read_text().splitlines() if line.strip()]
     regression = [case for case in old_cases if case['split'] in ('test', 'ood') and case['spec'].get('scenario') != 'basic']
     (args.output / 'regression_cases.jsonl').write_text(''.join(json.dumps(case, sort_keys=True) + '\n' for case in regression))
 
