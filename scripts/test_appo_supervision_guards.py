@@ -1,6 +1,7 @@
 """Protocol binding and interrupted-run completion checks; no simulator/GPU."""
 import copy
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -115,6 +116,32 @@ class SupervisionGuards(unittest.TestCase):
                 self.assertTrue(manifest['aborted'])
                 self.assertEqual(len(manifest['missing_jobs']), 21)
                 self.assertIn(type(interruption).__name__, manifest['errors'][0])
+
+    def test_runner_reads_repo_configs_independent_of_cwd(self):
+        # configs/unified_games_v1_cases.jsonl used to be opened relative to the
+        # process cwd, so launching the runner from outside the repository root
+        # failed with FileNotFoundError after output directories were created.
+        interruption = KeyboardInterrupt()
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / 'experiment'
+            argv = ['run_appo_supervision', '--datasets', tmp, '--init-checkpoint', tmp,
+                    '--output', str(output)]
+            dataset = {'collection_manifest': {}, 'expert_manifest': {},
+                       'split_sha256': dict.fromkeys(SPLITS, 'hash')}
+            previous_cwd = os.getcwd()
+            os.chdir(tmp)
+            try:
+                with patch.object(runner.sys, 'argv', argv), \
+                     patch.object(runner, 'load_protocol', return_value=(self.protocol, self.cases, 'p' * 64)), \
+                     patch.object(runner, 'file_sha256', return_value='hash'), \
+                     patch.object(runner, 'read_unified_dataset', return_value=([], dataset, [], {})), \
+                     patch.object(runner, 'validate_collection_binding'), \
+                     patch.object(runner, 'validate_expert_rows'), \
+                     patch.object(runner.concurrent.futures, 'ThreadPoolExecutor', side_effect=interruption):
+                    with self.assertRaises(KeyboardInterrupt):
+                        runner.main()
+            finally:
+                os.chdir(previous_cwd)
 
 
 if __name__ == '__main__':
