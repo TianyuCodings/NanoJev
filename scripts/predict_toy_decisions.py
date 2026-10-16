@@ -84,6 +84,7 @@ def validate_request(payload):
 
 def prepare_examples(payload, tokenizer, max_length):
     """逐段encode、候选文本和EOS均精确遵循train_toy_decisions.load_examples。"""
+    encoding = load_encoding_module()
     states = validate_request(payload)
     if type(max_length) is not int or max_length <= 0:
         raise ValueError("max_length 必须为正整数")
@@ -93,29 +94,15 @@ def prepare_examples(payload, tokenizer, max_length):
     for row in states:
         for qid, q in row["questions"].items():
             typ = q["type"]
-            if typ == "boolean":
-                ids, texts = ["false", "true"], ["The proposition is true."]
-            elif typ == "choice":
-                ids = list(q["criteria"])
-                texts = [f"{key}: {q['criteria'][key]}" for key in ids]
-            else:
-                ids = [str(i) for i in range(len(q["criteria"]))]
-                texts = q["criteria"]
-            segments = [f"State:\n{row['state']}\n",
-                        f"Question type: {typ}\nQuestion:\n{q['instructions']}\n"]
-            if typ == "boolean" and "criteria" in q:
-                for key, label in (("false", "False"), ("true", "True")):
-                    if key in q["criteria"]:
-                        segments[1] += f"{label} criterion: {q['criteria'][key]}\n"
-            prefix = sum([tokenizer.encode(t, add_special_tokens=False) for t in segments], [])
-            leaves = [prefix + tokenizer.encode(f"Candidate:\n{t}\nDecision:", add_special_tokens=False)
-                      + [tokenizer.eos_token_id] for t in texts]
+            # One canonical encoder for training and serving; see decision_encoding.py.
+            ids, texts, prefix, leaves = encoding.build_candidate_paths(
+                tokenizer.encode, row["state"], q, tokenizer.eos_token_id)
             largest = max(map(len, leaves))
             if largest > max_length:
                 raise ValueError(f"{row['id']}:{qid} 候选路径为 {largest} token，超过 max_length={max_length}；未截断输入")
             examples.append({"id": f"{row['id']}:{qid}", "state_id": row["id"], "qid": qid,
                              "type": typ, "candidate_ids": ids, "candidate_texts": texts,
-                             "leaf_tokens": leaves})
+                             "prefix_length": len(prefix), "leaf_tokens": leaves})
     return examples
 
 
@@ -162,15 +149,33 @@ def local_checkpoint_files(checkpoint_dir):
     return root, paths
 
 
-def load_decision_model_class():
-    # 延迟导入，schema/分词一致性检查不需要本机安装torch，也不执行trainer.main。
-    path = Path(__file__).with_name("train_toy_decisions.py")
-    spec = importlib.util.spec_from_file_location("openjev_toy_trainer_for_inference", path)
+def load_sibling_module(module_name):
+    """Load a sibling script by path without requiring it to be importable.
+
+    Delayed on purpose: schema and tokenization checks must work on a machine without
+    torch, and importing the trainer would execute its module level work.
+    """
+    path = Path(__file__).with_name(module_name + ".py")
+    spec = importlib.util.spec_from_file_location("openjev_" + module_name, path)
     if spec is None or spec.loader is None:
-        raise RuntimeError("无法加载本地 DecisionModel 定义")
+        raise RuntimeError(f"无法加载本地模块：{module_name}")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return module.DecisionModel
+    return module
+
+
+def load_encoding_module():
+    """规范编码；与 trainer 共用同一份实现。"""
+    return load_sibling_module("decision_encoding")
+
+
+def load_decision_model_class():
+    return load_sibling_module("train_toy_decisions").DecisionModel
+
+
+def load_shared_prefix_module():
+    """共享前缀编码器；schema 检查路径不需要它。"""
+    return load_sibling_module("shared_prefix")
 
 
 class DecisionPredictor:
@@ -238,24 +243,39 @@ class DecisionPredictor:
         self.inference_calls = 0
         self._torch = torch
 
-    def predict(self, payload, batch_questions=0, temperature=1.0):
+    def predict(self, payload, batch_questions=0, temperature=1.0, prefix_sharing=False,
+                suffix_chunk=None):
         states = validate_request(payload)
         if not isinstance(temperature, (int, float)) or isinstance(temperature, bool) or not math.isfinite(temperature) or temperature <= 0:
             raise ValueError("temperature 必须为有限正数")
+        if type(prefix_sharing) is not bool:
+            raise ValueError("prefix_sharing 必须为布尔值")
+        if suffix_chunk is not None and (type(suffix_chunk) is not int or suffix_chunk < 1):
+            raise ValueError("suffix_chunk 必须为 None 或正整数")
         torch = self._torch
         model, tokenizer = self.model, self.tokenizer
         root, run_config, limit = self.root, self.run_config, self.limit
         device, precision = self.device, self.precision
         disable_native_triton = self.disable_native_triton
         examples = prepare_examples(payload, tokenizer, limit)
-        batches = complete_question_batches(examples, batch_questions)
+        # With shared prefixes every question owns an independent prefix cache, so the
+        # question limit no longer partitions the backbone work. The reference path keeps
+        # its historical batching so that its reported forward_passes stay comparable.
+        batches = [examples] if prefix_sharing else complete_question_batches(examples, batch_questions)
         self.inference_calls += 1
         model.eval()
+        sharing = None
+        if prefix_sharing:
+            shared_prefix = load_shared_prefix_module()
+            sharing = shared_prefix.SharedPrefixEncoder(
+                model.backbone, pad_token_id=tokenizer.pad_token_id, device=device,
+                suffix_chunk=suffix_chunk)
+            SharedPrefixPlan = shared_prefix.SharedPrefixPlan
         outputs = {state["id"]: {"id": state["id"], "answers": {}} for state in states}
         with torch.inference_mode():
             for batch in batches:
                 with torch.autocast("cuda", dtype=torch.bfloat16, enabled=precision == "bf16"):
-                    logits, _ = model(batch, tokenizer.pad_token_id)
+                    logits, _ = model(batch, tokenizer.pad_token_id, prefix_sharing=sharing)
                 for example, values in zip(batch, logits):
                     k = len(example["candidate_ids"])
                     scores = values[:k].float()
@@ -263,6 +283,20 @@ class DecisionPredictor:
                         raise ValueError("模型产生非有限logits，未返回部分预测")
                     probabilities = (scores / temperature).softmax(-1).cpu().tolist()
                     outputs[example["state_id"]]["answers"][example["qid"]] = answer_from_probabilities(example, probabilities)
+        # Report what ran, not what was requested: a batch with no shareable prefix falls
+        # back to the reference encoder inside DecisionModel.forward.
+        used_sharing = bool(sharing is not None and sharing.used_shared_prefix)
+        sharing_report = {"requested": bool(prefix_sharing), "used": used_sharing,
+                          "tree_attention": used_sharing,
+                          "note": "候选路径共享 state 前缀；布尔与 Choice 的输入 token 与参考实现一致。"}
+        if sharing is not None:
+            plan = SharedPrefixPlan(examples)
+            accounting = plan.accounting()
+            sharing_report["accounting"] = accounting
+            sharing_report["observed"] = dict(sharing.stats)
+            sharing_report["plan_covers_all_questions"] = accounting["fully_shared"]
+            if prefix_sharing and not used_sharing:
+                sharing_report["fallback_reason"] = "本批次没有可共享前缀，已回退参考编码"
         return {
             "schema_version": "openjev-toy-inference-v1",
             "checkpoint": {"directory": str(root), "base_model": run_config.get("model"),
@@ -274,7 +308,11 @@ class DecisionPredictor:
                           "states": len(states), "questions": len(examples),
                           "candidate_paths": sum(len(ex["leaf_tokens"]) for ex in examples),
                           "forward_passes": len(batches), "batch_questions_limit": batch_questions or "all",
-                          "autoregressive_decode_steps": 0, "prefix_sharing": False,
+                          "autoregressive_decode_steps": 0, "prefix_sharing": used_sharing,
+                          "tree_attention": used_sharing,
+                          "prefix_sharing_requested": bool(prefix_sharing),
+                          "suffix_chunk": suffix_chunk,
+                          "sharing": sharing_report,
                           "max_length": limit, "disable_native_triton": disable_native_triton,
                           "network_model_calls": 0, "persistent_model_load_count": 1,
                           "inference_call_index": self.inference_calls},
@@ -283,7 +321,8 @@ class DecisionPredictor:
 
 
 def predict(payload, checkpoint_dir, temperature=1.0, batch_questions=0, max_length=None,
-            device_name="cuda:0", disable_native_triton=False, precision="bf16"):
+            device_name="cuda:0", disable_native_triton=False, precision="bf16",
+            prefix_sharing=False, suffix_chunk=None):
     """兼容原一次性接口；连续调用请复用DecisionPredictor实例。"""
     # Fail on malformed input before loading a checkpoint, as in the original entry point.
     validate_request(payload)
@@ -291,7 +330,8 @@ def predict(payload, checkpoint_dir, temperature=1.0, batch_questions=0, max_len
         raise ValueError("temperature 必须为有限正数")
     engine = DecisionPredictor(checkpoint_dir, max_length=max_length, device_name=device_name,
                                disable_native_triton=disable_native_triton, precision=precision)
-    return engine.predict(payload, batch_questions=batch_questions, temperature=temperature)
+    return engine.predict(payload, batch_questions=batch_questions, temperature=temperature,
+                          prefix_sharing=prefix_sharing, suffix_chunk=suffix_chunk)
 
 
 def main():
@@ -306,10 +346,15 @@ def main():
     parser.add_argument("--precision", choices=["fp32", "bf16"], default="bf16",
                         help="bf16沿用训练评估默认；fp32关闭autocast用于数值参照")
     parser.add_argument("--disable-native-triton", action="store_true", help="沿用trainer的进程内ATen回退开关")
+    parser.add_argument("--prefix-sharing", action="store_true",
+                        help="每个 state/question 前缀只前向一次，候选仅前向自身后缀")
+    parser.add_argument("--suffix-chunk", type=int,
+                        help="共享前缀模式下每次后缀前向的候选行数上限；默认一次处理全部候选")
     args = parser.parse_args()
     try:
         result = predict(read_json(args.input), args.checkpoint_dir, args.temperature, args.batch_questions,
-                         args.max_length, args.device, args.disable_native_triton, precision=args.precision)
+                         args.max_length, args.device, args.disable_native_triton, precision=args.precision,
+                         prefix_sharing=args.prefix_sharing, suffix_chunk=args.suffix_chunk)
         text = json.dumps(result, ensure_ascii=False, indent=2, allow_nan=False) + "\n"
         if args.output:
             destination = Path(args.output)
