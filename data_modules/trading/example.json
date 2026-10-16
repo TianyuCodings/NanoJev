@@ -1,0 +1,100 @@
+{
+  "id": "coinbase:BTC:1min:1617796061122161:multi_v2",
+  "state_id": "coinbase:BTC:1min:1617796061122161",
+  "family_id": "coinbase_btc_multi_horizon_direction_v2",
+  "split": "train",
+  "state": "Coinbase BTC order-book snapshot series. Decision time UTC: 2021-04-07T11:48:41.122161+00:00. Provider 1-minute rows become available 60s after their system timestamp. Only completed historical snapshots are used. Latest completed midpoint: 56100.01500000; spread: 0.01000000 (0.001783 bps). Top-five bid/ask book-notional imbalance: -0.42981627. Past 15 rows: latest-versus-past midpoint returns (age:change) [60.000s:5.671663bps, 240.000s:-8.444732bps, 540.000s:-0.028520bps, 840.000s:36.447861bps].",
+  "questions": {
+    "midpoint_direction_60s": {
+      "type": "choice",
+      "instructions": "Predict the direction of the first completed provider 1-minute midpoint snapshot available at least 60 seconds after the decision time (maximum extra wait 15 seconds), relative to the latest completed midpoint in the state. Use a symmetric 2 basis-point flat band.",
+      "criteria": {
+        "down": "Return strictly below -2 bps.",
+        "flat": "Return between -2 and +2 bps, inclusive.",
+        "up": "Return strictly above +2 bps."
+      }
+    },
+    "midpoint_direction_300s": {
+      "type": "choice",
+      "instructions": "Predict the direction of the first completed provider 1-minute midpoint snapshot available at least 300 seconds after the decision time (maximum extra wait 15 seconds), relative to the latest completed midpoint in the state. Use a symmetric 2 basis-point flat band.",
+      "criteria": {
+        "down": "Return strictly below -2 bps.",
+        "flat": "Return between -2 and +2 bps, inclusive.",
+        "up": "Return strictly above +2 bps."
+      }
+    },
+    "midpoint_direction_900s": {
+      "type": "choice",
+      "instructions": "Predict the direction of the first completed provider 1-minute midpoint snapshot available at least 900 seconds after the decision time (maximum extra wait 15 seconds), relative to the latest completed midpoint in the state. Use a symmetric 2 basis-point flat band.",
+      "criteria": {
+        "down": "Return strictly below -2 bps.",
+        "flat": "Return between -2 and +2 bps, inclusive.",
+        "up": "Return strictly above +2 bps."
+      }
+    }
+  },
+  "gold": {
+    "midpoint_direction_60s": "down",
+    "midpoint_direction_300s": "up",
+    "midpoint_direction_900s": "up"
+  },
+  "gold_probs": {},
+  "gold_probs_kind": {},
+  "gold_label_kind": {
+    "midpoint_direction_60s": "observed_outcome",
+    "midpoint_direction_300s": "observed_outcome",
+    "midpoint_direction_900s": "observed_outcome"
+  },
+  "metadata": {
+    "source": "https://www.kaggle.com/datasets/martinsn/high-frequency-crypto-limit-order-book-data",
+    "license": "CC0-1.0 (publisher declaration)",
+    "source_group_id": "coinbase:utc-day:2021-04-07",
+    "template_id": "trading:multi_horizon:v2",
+    "source_sha256": "8a6035dcdd26b4bdf3e861bfbf430a0a37f8939cc3914b8e1e27d0b40599e5b8",
+    "source_csv_line": 16,
+    "feature_first_csv_line": 2,
+    "decision_time": "2021-04-07T11:48:41.122161+00:00",
+    "latest_source_time": "2021-04-07T11:47:41.122161+00:00",
+    "feature_support_start": "2021-04-07T11:33:41.122161+00:00",
+    "feature_available_at": "2021-04-07T11:48:41.122161+00:00",
+    "label_available_at": "2021-04-07T12:03:41.122161+00:00",
+    "support_end": "2021-04-07T12:03:41.122161+00:00",
+    "label_audit": {
+      "midpoint_direction_60s": {
+        "label_csv_line": 17,
+        "label_source_time": "2021-04-07T11:48:41.122161+00:00",
+        "label_available_at": "2021-04-07T11:49:41.122161+00:00",
+        "horizon_seconds": 60,
+        "realized_horizon_seconds": 60.0,
+        "reference_midpoint": 56100.015,
+        "future_midpoint": 55952.485,
+        "return_bps": -26.297675677983136,
+        "flat_threshold_bps": 2
+      },
+      "midpoint_direction_300s": {
+        "label_csv_line": 21,
+        "label_source_time": "2021-04-07T11:52:41.122161+00:00",
+        "label_available_at": "2021-04-07T11:53:41.122161+00:00",
+        "horizon_seconds": 300,
+        "realized_horizon_seconds": 300.0,
+        "reference_midpoint": 56100.015,
+        "future_midpoint": 56163.445,
+        "return_bps": 11.306592342266164,
+        "flat_threshold_bps": 2
+      },
+      "midpoint_direction_900s": {
+        "label_csv_line": 31,
+        "label_source_time": "2021-04-07T12:02:41.122161+00:00",
+        "label_available_at": "2021-04-07T12:03:41.122161+00:00",
+        "horizon_seconds": 900,
+        "realized_horizon_seconds": 900.0,
+        "reference_midpoint": 56100.015,
+        "future_midpoint": 56119.455,
+        "return_bps": 3.465239715176871,
+        "flat_threshold_bps": 2
+      }
+    },
+    "target_semantics": "single_observed_outcome; conditional_distribution_unknown",
+    "ood_definition": null
+  }
+}

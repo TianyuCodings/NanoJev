@@ -1,0 +1,26 @@
+{
+  "blackjack": {
+    "repo_id": "XinranSong/nanojev-blackjack-finite-v2",
+    "revision": "f8c3599d62162166effe14a6d4257dc7bf0a3605",
+    "manifest_sha256": "162e238533ed0318da22392b2c769d52f89dcb9a8ad861d0e579229d1bfff7c0",
+    "splits": {
+      "train": 2400,
+      "dev": 400,
+      "calibration": 400,
+      "test": 400,
+      "ood": 400
+    }
+  },
+  "trading": {
+    "repo_id": "XinranSong/nanojev-coinbase-btc-direction-v2",
+    "revision": "b404a4ef4cf820f700296db7cf8293caaf1fb816",
+    "manifest_sha256": "2471f196ebab6235bb359ef4988fa61a23e813420b24ae2e84f935eac02f18b6",
+    "splits": {
+      "train": 8260,
+      "dev": 1258,
+      "calibration": 1258,
+      "test": 2518,
+      "ood": 1795
+    }
+  }
+}

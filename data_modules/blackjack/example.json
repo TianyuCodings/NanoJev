@@ -1,0 +1,139 @@
+{
+  "id": "finite-bj:d6532dce1f458e2309f8e13d",
+  "state_id": "finite-bj:d6532dce1f458e2309f8e13d",
+  "family_id": "blackjack_finite_composition_v2",
+  "split": "train",
+  "state": "Player cards [6, 10]; total 16; usable ace false; dealer upcard 10. Remaining drawable counts for ranks [A,2,3,4,5,6,7,8,9,10-value]: [4, 3, 2, 4, 4, 3, 2, 3, 4, 7]. A=1 or 11; 10-value includes 10/J/Q/K. Visible cards are already excluded from these counts. Draw uniformly from remaining cards WITHOUT replacement; reduce the drawn rank count by one. Dealer has NO predealt hole card and draws only after the player stops. No peek. Dealer stands on soft 17, hits totals below 17, and stands on hard 17 and all 18-21. Player bust loses immediately. Win/push/loss pay +1/0/-1; natural 21 has no bonus. Only hit/stand are allowed. After the first action, player uses the expected-reward-optimal policy with updated counts, standing on ties. No reshuffle within a hand.",
+  "questions": {
+    "best_action": {
+      "type": "choice",
+      "instructions": "Which first action maximizes expected final reward with the stated optimal continuation?",
+      "criteria": {
+        "hit": "Draw a card without replacement, then continue optimally.",
+        "stand": "Stop drawing; let the dealer finish."
+      }
+    },
+    "hit_outcome": {
+      "type": "choice",
+      "instructions": "What is the final hand outcome after choosing hit first, with the stated continuation?",
+      "criteria": {
+        "loss": "Player loses (reward -1).",
+        "push": "Tie (reward 0).",
+        "win": "Player wins (reward +1)."
+      }
+    },
+    "hit_win": {
+      "type": "boolean",
+      "instructions": "The player wins after choosing hit first and following the stated continuation; a tie is not a win."
+    },
+    "stand_outcome": {
+      "type": "choice",
+      "instructions": "What is the final hand outcome after choosing stand first, with the stated continuation?",
+      "criteria": {
+        "loss": "Player loses (reward -1).",
+        "push": "Tie (reward 0).",
+        "win": "Player wins (reward +1)."
+      }
+    },
+    "stand_win": {
+      "type": "boolean",
+      "instructions": "The player wins after choosing stand first and following the stated continuation; a tie is not a win."
+    }
+  },
+  "gold": {
+    "best_action": "hit"
+  },
+  "gold_probs": {
+    "best_action": {
+      "hit": 1.0,
+      "stand": 0.0
+    },
+    "hit_outcome": {
+      "loss": 0.690729626161315,
+      "push": 0.07516837812022821,
+      "win": 0.2341019957184568
+    },
+    "hit_win": {
+      "false": 0.7658980042815432,
+      "true": 0.2341019957184568
+    },
+    "stand_outcome": {
+      "loss": 0.7877117611462963,
+      "push": 0.0,
+      "win": 0.21228823885370374
+    },
+    "stand_win": {
+      "false": 0.7877117611462963,
+      "true": 0.21228823885370374
+    }
+  },
+  "gold_probs_kind": {
+    "best_action": "optimal_action_policy",
+    "hit_outcome": "programmatic_conditional_distribution",
+    "hit_win": "programmatic_conditional_distribution",
+    "stand_outcome": "programmatic_conditional_distribution",
+    "stand_win": "programmatic_conditional_distribution"
+  },
+  "gold_label_kind": {
+    "best_action": "reference_argmax_compatibility",
+    "hit_outcome": "unobserved",
+    "hit_win": "unobserved",
+    "stand_outcome": "unobserved",
+    "stand_win": "unobserved"
+  },
+  "metadata": {
+    "source": "self_authored_exact_finite_deck_dynamic_program",
+    "source_group_id": "finite-shoe:21a06b8ebd0cc5b89ee850a6",
+    "template_id": "finite-bj:v2",
+    "environment_state": {
+      "player_cards": [
+        6,
+        10
+      ],
+      "player_total": 16,
+      "usable_ace": false,
+      "dealer_upcard": 10,
+      "remaining_counts": [
+        4,
+        3,
+        2,
+        4,
+        4,
+        3,
+        2,
+        3,
+        4,
+        7
+      ],
+      "dealer_hits_soft_17": false,
+      "dealer_hole_card": "none",
+      "parent_shoe_counts": [
+        4,
+        3,
+        2,
+        4,
+        4,
+        4,
+        2,
+        3,
+        4,
+        9
+      ]
+    },
+    "semantic_state_without_rule": "2c8c6a02e3295c46ca8e1422",
+    "action_values": {
+      "hit": -0.45662763044285815,
+      "stand": -0.5754235222925925
+    },
+    "regret": {
+      "hit": 0.0,
+      "stand": 0.11879589184973438
+    },
+    "optimal_actions": [
+      "hit"
+    ],
+    "method": "exact_enumeration_float64_no_monte_carlo",
+    "target_semantics": "policy separate from model event probabilities; no softmax(Q)",
+    "ood_definition": null
+  }
+}

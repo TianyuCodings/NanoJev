@@ -1,0 +1,6 @@
+blackjack/data/
+trading/data/
+trading/raw/
+__pycache__/
+*.pyc
+*.part
