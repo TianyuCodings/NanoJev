@@ -123,7 +123,7 @@ snapshot_download(
 )
 ```
 
-在 CUDA 环境启动推理服务：
+启动推理服务。设备自动选择：有 CUDA GPU 时使用第一块 GPU，否则使用 CPU（fp32，较慢）。可用 `--device cpu` 或 `--device cuda:0` 强制指定：
 
 ```bash
 python scripts/serve_decisions.py \

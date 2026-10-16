@@ -162,6 +162,18 @@ def local_checkpoint_files(checkpoint_dir):
     return root, paths
 
 
+def resolve_device(torch, device_name="auto"):
+    """auto: first CUDA GPU when available, otherwise CPU; explicit names are validated."""
+    if device_name in (None, "", "auto"):
+        return torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    device = torch.device(device_name)
+    if device.type == "cuda" and not torch.cuda.is_available():
+        raise ValueError(f"device {device_name} was requested but CUDA is not available; use --device auto or cpu")
+    if device.type not in {"cuda", "cpu"}:
+        raise ValueError("device must be auto, cpu or cuda[:N]")
+    return device
+
+
 def load_decision_model_class():
     # 延迟导入，schema/分词一致性检查不需要本机安装torch，也不执行trainer.main。
     path = Path(__file__).with_name("train_toy_decisions.py")
@@ -176,7 +188,7 @@ def load_decision_model_class():
 class DecisionPredictor:
     """本地持久推理对象：构造时加载一次权重，每次predict批量计算完整问题。"""
 
-    def __init__(self, checkpoint_dir, max_length=None, device_name="cuda:0",
+    def __init__(self, checkpoint_dir, max_length=None, device_name="auto",
                  disable_native_triton=False, precision="bf16"):
         if precision not in {"fp32", "bf16"}:
             raise ValueError("precision 必须为 fp32 或 bf16")
@@ -194,15 +206,23 @@ class DecisionPredictor:
         from transformers import AutoConfig, AutoModel, AutoTokenizer
     
         if disable_native_triton:
-            from torch._native import triton_utils
-            triton_utils.deregister_op_overrides()
-        device = torch.device(device_name)
-        if device.type != "cuda" or not torch.cuda.is_available():
-            raise ValueError("此原型推理入口需要可用CUDA设备；本命令未启用CPU或远程回退")
-        torch.cuda.set_device(device)
-        if precision == "bf16" and not torch.cuda.is_bf16_supported():
-            raise ValueError("当前CUDA设备不支持本checkpoint推理配置所需的BF16")
-        torch.backends.cuda.matmul.allow_tf32 = False
+            try:
+                from torch._native import triton_utils
+            except ImportError:
+                triton_utils = None  # CPU-only or older torch builds ship no native Triton overrides.
+            if triton_utils is not None:
+                triton_utils.deregister_op_overrides()
+        device = resolve_device(torch, device_name)
+        if device.type == "cuda":
+            torch.cuda.set_device(device)
+            torch.backends.cuda.matmul.allow_tf32 = False
+            if precision == "bf16" and not torch.cuda.is_bf16_supported():
+                print("warning: CUDA device lacks BF16 support; falling back to fp32", file=sys.stderr)
+                precision = "fp32"
+        elif precision == "bf16":
+            # CPU BF16 autocast is slow on most CPUs and diverges from the GPU results; use fp32.
+            print("warning: running on CPU; using fp32 instead of bf16", file=sys.stderr)
+            precision = "fp32"
     
         tokenizer = AutoTokenizer.from_pretrained(str(paths["tokenizer"]), local_files_only=True,
                                                  trust_remote_code=False)
@@ -254,7 +274,7 @@ class DecisionPredictor:
         outputs = {state["id"]: {"id": state["id"], "answers": {}} for state in states}
         with torch.inference_mode():
             for batch in batches:
-                with torch.autocast("cuda", dtype=torch.bfloat16, enabled=precision == "bf16"):
+                with torch.autocast(device.type, dtype=torch.bfloat16, enabled=precision == "bf16"):
                     logits, _ = model(batch, tokenizer.pad_token_id)
                 for example, values in zip(batch, logits):
                     k = len(example["candidate_ids"])
@@ -283,7 +303,7 @@ class DecisionPredictor:
 
 
 def predict(payload, checkpoint_dir, temperature=1.0, batch_questions=0, max_length=None,
-            device_name="cuda:0", disable_native_triton=False, precision="bf16"):
+            device_name="auto", disable_native_triton=False, precision="bf16"):
     """兼容原一次性接口；连续调用请复用DecisionPredictor实例。"""
     # Fail on malformed input before loading a checkpoint, as in the original entry point.
     validate_request(payload)
@@ -302,7 +322,7 @@ def main():
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--batch-questions", type=int, default=0, help="0=全部问题一次前向；其他值按完整问题分批")
     parser.add_argument("--max-length", type=int, help="默认使用checkpoint训练配置；超长输入报错，不截断")
-    parser.add_argument("--device", default="cuda:0")
+    parser.add_argument("--device", default="auto", help="auto (GPU if available, else CPU), cpu or cuda[:N]")
     parser.add_argument("--precision", choices=["fp32", "bf16"], default="bf16",
                         help="bf16沿用训练评估默认；fp32关闭autocast用于数值参照")
     parser.add_argument("--disable-native-triton", action="store_true", help="沿用trainer的进程内ATen回退开关")

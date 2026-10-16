@@ -123,7 +123,7 @@ snapshot_download(
 )
 ```
 
-Start inference in a CUDA environment:
+Start inference. The device is picked automatically: the first CUDA GPU when available, otherwise the CPU (fp32, slower). Force one with `--device cpu` or `--device cuda:0`:
 
 ```bash
 python scripts/serve_decisions.py \
@@ -131,7 +131,7 @@ python scripts/serve_decisions.py \
   --web-root web --port 8765 --disable-native-triton
 ```
 
-The service loads the model once. Send state/question batches to **`POST http://127.0.0.1:8765/api/evaluate`**.
+The service loads the model once and prints the device and precision it chose. Send state/question batches to **`POST http://127.0.0.1:8765/api/evaluate`**.
 
 To explore the recorded games locally:
 
