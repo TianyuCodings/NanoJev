@@ -1,0 +1,6 @@
+# Apple Silicon / MLX decision inference (recorded on macOS arm64)
+mlx
+mlx-lm
+safetensors
+transformers
+numpy
